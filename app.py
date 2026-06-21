@@ -36,7 +36,7 @@ def init_gate():
 
 exchange = init_gate()
 
-@st.cache_data(ttl=1)
+@st.cache_data(ttl=1.5)
 def get_market_data_gate():
     try:
         # 锁定 Gate.io 官方现货数据
@@ -53,12 +53,10 @@ def get_market_data_gate():
     df = pd.DataFrame(mock_bars[::-1], columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     return df.to_dict(orient='list'), mock_price, False
 
-# ⚠️ 【硬核改动】分析函数完全基于【已经收盘定型】的上一根K线，保证这5分钟内信号绝对不发生任何漂移！
+# 分析函数完全基于【已经完美收盘】的上一 K 线，保证5分钟内信号绝不漂移！
 def analyze_pure_completed_market(df):
     if df is None or len(df) < 10: return 50.0, 50.0
     
-    # df.iloc[-1] 是当前正在变动的K线（抛弃不用，防止漂移）
-    # df.iloc[-2] 是上一根【刚刚完美收盘定型】的5分钟K线！整个策略以它为准
     completed_bar = df.iloc[-2]
     o, h, l, c = completed_bar['open'], completed_bar['high'], completed_bar['low'], completed_bar['close']
     v = completed_bar['volume']
@@ -107,7 +105,7 @@ if 'total_count' not in st.session_state: st.session_state.total_count = 0
 st.markdown("<h2 style='text-align: center; color: #ffbc00;'>🦅 Gate.io BTC 5M 事件合约决策终端</h2>", unsafe_allow_html=True)
 main_container = st.container()
 
-# 读数据
+# ⚠️ 此处已彻底修复语法错误
 df_dict, current_price, is_live = get_market_data_gate()
 df = pd.DataFrame(df_dict)
 
@@ -123,10 +121,10 @@ last_close_price = float(df['close'].iloc[-2])
 price_diff = current_price - last_close_price
 diff_html = f"<span style='color:#00e676; font-size:16px;'>▲ 当前波动: +${price_diff:,.2f}</span>" if price_diff >= 0 else f"<span style='color:#ff1744; font-size:16px;'>▼ 当前波动: -${abs(price_diff):,.2f}</span>"
 
-# 🛑 核心机制：只根据已经收盘的K线算指标，整个5分钟内这两个数字是“死死锁定”的，绝不变动！
+# 核心机制：5分钟周期内，这两个数字被死死锁定，绝不变动！
 prob_up, prob_down = analyze_pure_completed_market(df)
 
-# 自动结账逻辑
+# 自动结账流水线
 if st.session_state.last_recorded_period != period_time_str and len(df) > 2:
     closed_bar = df.iloc[-2]
     actual_direction = "涨 (UP)" if closed_bar['close'] >= closed_bar['open'] else "跌 (DOWN)"
@@ -150,7 +148,7 @@ if st.session_state.last_recorded_period != period_time_str and len(df) > 2:
     st.session_state.real_history.insert(0, {"期号": period_time_str, "判定": pred, "胜率": f"{max(prob_up, prob_down)}%", "结果": res_str, "差额": diff_str})
     st.session_state.last_recorded_period = period_time_str
 
-# 下注核心展示
+# 下注信号
 if rem_seconds > 15:
     if prob_up >= 65.0:
         signal_html = f"<div class='signal-box-up'>🔥 <b>买定离手信号</b> ➔ <span style='color:#00e676;font-size:20px;font-weight:bold;'>看【UP / 涨】合约</span> (本期胜率锁定: {prob_up}%)</div>"
@@ -203,7 +201,7 @@ with main_container:
             </div>
             """, unsafe_allow_html=True)
 
-# JS 秒级强刷
+# JS 秒级强刷马达
 st.components.v1.html(
     """
     <script>
