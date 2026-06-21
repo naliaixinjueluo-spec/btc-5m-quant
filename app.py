@@ -28,7 +28,8 @@ local_tz = pytz.timezone('Asia/Shanghai')
 
 @st.cache_resource
 def init_gate():
-    return ccxt.gateio({
+    # 【核心修复】完美兼容最新版 ccxt 库的交易所标准名称 gate
+    return ccxt.gate({
         'enableRateLimit': True, 
         'timeout': 5000,
         'options': {'defaultType': 'spot'}
@@ -227,7 +228,7 @@ with main_container:
             </div>
             """, unsafe_allow_html=True)
 
-# 🚀 替换为经典兼容、永不死循环的老版本纯 HTML 强刷马达
+# 经典元标签机制强刷
 st.components.v1.html(
     f"""
     <html>
