@@ -12,6 +12,9 @@ from scipy.stats import norm
 # =================================================================
 st.set_page_config(page_title="🦅 Gate.io BTC 5M 决策端", layout="centered")
 
+# 使用官方原生的高级定时刷机制：每 2 秒雷打不动全盘刷新一次，绝不卡死
+st.fragment(run_every=2)
+
 st.markdown("""
 <style>
     .stApp { background-color: #0c0f17; color: #ffffff; }
@@ -101,7 +104,6 @@ if 'last_recorded_period' not in st.session_state: st.session_state.last_recorde
 if 'win_count' not in st.session_state: st.session_state.win_count = 0
 if 'total_count' not in st.session_state: st.session_state.total_count = 0
 
-# 【修复核心】初始化锁定状态，彻底避免 NameError 报错
 if 'locked_decision' not in st.session_state: st.session_state.locked_decision = "观望"
 if 'locked_win_rate' not in st.session_state: st.session_state.locked_win_rate = 50.0
 
@@ -125,15 +127,14 @@ diff_html = f"<span style='color:#00e676; font-size:16px;'>▲ 当前波动: +${
 
 prob_up, prob_down = analyze_dynamic_market(df, current_price)
 
-# 兜底变量赋初始值，坚决不给报错机会
 current_decision = "观望"
 current_rate = max(prob_up, prob_down)
 
 if rem_seconds > 30:
-    if prob_up >= 62.0:
+    if prob_up >= 61.0:
         current_decision = "看涨 (UP)"
         current_rate = prob_up
-    elif prob_down >= 62.0:
+    elif prob_down >= 61.0:
         current_decision = "看跌 (DOWN)"
         current_rate = prob_down
     else:
@@ -210,9 +211,9 @@ with main_container:
     st.markdown("### 🎯 大模型下注核心提示")
     st.markdown(signal_html, unsafe_allow_html=True)
     
-    st.markdown("#### 📊 全要素推推演置信度矩阵")
+    st.markdown("#### 📊 全要素推演置信度矩阵")
     st.progress(prob_up / 100.0, text=f"综合看涨 (UP) 指数: {prob_up}%")
-    st.progress(prob_down / 100.0, text=f"综合看跌 (DOWN) 指数: {prob_down}%")
+    st.progress(prob_down / 100.0, text=f"综合看跌 (DOWN) 指ys数: {prob_down}%")
     
     st.write("---")
     st.markdown("### 📋 往期预测结果真实历史记录")
@@ -228,27 +229,3 @@ with main_container:
                 <span>收盘差：{item['差额']}</span>
             </div>
             """, unsafe_allow_html=True)
-
-# 原生 JS 强刷
-st.components.v1.html(
-    """
-    <script>
-    if (!window.hasAutoRefreshStarted) {
-        window.hasAutoRefreshStarted = true;
-        setInterval(function() {
-            const buttons = window.parent.document.querySelectorAll("button");
-            let rrnBtn = null;
-            for (let btn of buttons) {
-                if (btn.innerText === "Rerun" || btn.textContent.includes("Rerun")) {
-                    rrnBtn = btn;
-                    break;
-                }
-            }
-            if (rrnBtn) { rrnBtn.click(); } 
-            else { window.parent.postMessage({type: 'streamlit:render'}, '*'); }
-        }, 1500);
-    }
-    </script>
-    """,
-    height=0,
-)
