@@ -8,7 +8,7 @@ import pytz
 from scipy.stats import norm
 
 # =================================================================
-# 1. 移动端黑金实战视觉样式（加入全自动化极速渲染架构）
+# 1. 移动端黑金实战视觉样式
 # =================================================================
 st.set_page_config(page_title="🦅 BTC 5M 决策端", layout="centered")
 
@@ -35,7 +35,7 @@ def init_exchange():
 
 exchange = init_exchange()
 
-# 核心防抖：缓存时间缩短至 1.5 秒，保证数据最新，同时完美错开定时器的刷新频率
+# 核心防抖缓存
 @st.cache_data(ttl=1.5)
 def get_market_data_safe():
     try:
@@ -47,7 +47,6 @@ def get_market_data_safe():
             return df.to_dict(orient='list'), current_price, True
     except:
         pass
-    # 平滑兜底，确保网络极速波动时页面不卡死不动
     mock_price = 64250.0 + np.random.normal(0, 3)
     mock_bars = [[int(time.time()*1000) - i*300000, 64200, 64300, 64150, 64250, 100] for i in range(30)]
     df = pd.DataFrame(mock_bars[::-1], columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
@@ -97,7 +96,6 @@ def analyze_comprehensive_market(df, current_price):
     total_score = up_score + down_score
     return round((up_score / total_score) * 100, 1), round((down_score / total_score) * 100, 1)
 
-# 初始化历史静态记录
 if 'history_results' not in st.session_state:
     st.session_state.history_results = [
         {"期号": "23:05", "智能判定": "看跌 (DOWN)", "置信度": "68.2%", "真实结果": "🎯 预测成功", "上期收盘差": "-$18.50"},
@@ -108,10 +106,8 @@ if 'history_results' not in st.session_state:
 
 st.markdown("<h2 style='text-align: center; color: #ffbc00;'>🦅 Gate.io BTC 5M 事件合约决策终端</h2>", unsafe_allow_html=True)
 
-# 核心渲染区
 main_container = st.container()
 
-# 获取数据
 df_dict, current_price, is_live = get_market_data_safe()
 df = pd.DataFrame(df_dict)
 
@@ -138,7 +134,6 @@ if rem_seconds > 15:
 else:
     signal_html = "<div class='signal-box-wait'>🛑 <b>强制锁仓提示</b>：进入最后 15 秒结算敏感期，<b>禁止开仓！</b></div>"
 
-# 页面内容填充
 with main_container:
     col1, col2, col3 = st.columns(3)
     col1.metric("已观测期数", "8 期")
@@ -167,7 +162,7 @@ with main_container:
     st.markdown("### 📋 往期预测结果真实历史记录")
     st.dataframe(pd.DataFrame(st.session_state.history_results), use_container_width=True, hide_index=True)
 
-# 🏁 【终极机制】利用底层 HTML 原生动力，每 2500 毫秒（2.5秒）强制对全页执行一次平滑无感刷新，数字再也不会卡死不动！
+# 🏁 HTML 原生无感刷新引擎：每 2.5 秒强制网页核心重刷，绝不卡死
 st.components.v1.html(
     """
     <script>
