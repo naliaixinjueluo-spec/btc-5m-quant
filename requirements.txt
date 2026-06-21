@@ -1,6 +1,5 @@
+streamlit
 ccxt
 pandas
-numpy
+pytz
 scipy
-plotly
-streamlit
