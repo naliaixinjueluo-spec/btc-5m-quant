@@ -12,9 +12,6 @@ from scipy.stats import norm
 # =================================================================
 st.set_page_config(page_title="🦅 Gate.io BTC 5M 决策端", layout="centered")
 
-# 使用官方原生的高级定时刷机制：每 2 秒雷打不动全盘刷新一次，绝不卡死
-st.fragment(run_every=2)
-
 st.markdown("""
 <style>
     .stApp { background-color: #0c0f17; color: #ffffff; }
@@ -213,7 +210,7 @@ with main_container:
     
     st.markdown("#### 📊 全要素推演置信度矩阵")
     st.progress(prob_up / 100.0, text=f"综合看涨 (UP) 指数: {prob_up}%")
-    st.progress(prob_down / 100.0, text=f"综合看跌 (DOWN) 指ys数: {prob_down}%")
+    st.progress(prob_down / 100.0, text=f"综合看跌 (DOWN) 指数: {prob_down}%")
     
     st.write("---")
     st.markdown("### 📋 往期预测结果真实历史记录")
@@ -229,3 +226,17 @@ with main_container:
                 <span>收盘差：{item['差额']}</span>
             </div>
             """, unsafe_allow_html=True)
+
+# 🚀 替换为经典兼容、永不死循环的老版本纯 HTML 强刷马达
+st.components.v1.html(
+    f"""
+    <html>
+    <head>
+    <meta http-equiv="refresh" content="2">
+    </head>
+    <body>
+    </body>
+    </html>
+    """,
+    height=0,
+)
