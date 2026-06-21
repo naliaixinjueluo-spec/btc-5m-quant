@@ -98,10 +98,10 @@ if 'total_runs' not in st.session_state: st.session_state.total_runs = 4
 
 st.markdown("<h2 style='text-align: center; color: #ffbc00;'>🦅 Gate.io BTC 5M 事件合约决策终端</h2>", unsafe_allow_html=True)
 
-# 【核心改良】创建一个永不动摇的空白占位符槽位，只刷新内容，彻底不抖动不黑屏！
+# 【核心改良】创建一个永不动摇的空白占位符槽位
 main_placeholder = st.empty()
 
-# 进入秒级丝滑无缝重绘渲染循环
+# 获取数据
 df, current_price, now_time = get_market_data()
 
 if current_price and df is not None:
@@ -130,7 +130,7 @@ if current_price and df is not None:
 
     hist_df = pd.DataFrame(st.session_state.history_results)
 
-    # 重点：在槽位内部进行数据覆盖，不触动任何外部黑金CSS样式组件
+    # 在槽位内部进行覆盖，实现无闪烁刷新
     with main_placeholder.container():
         col1, col2, col3 = st.columns(3)
         col1.metric("已观测期数", f"{st.session_state.total_runs} 期")
@@ -158,7 +158,10 @@ if current_price and df is not None:
         st.write("---")
         st.markdown("### 📋 往期预测结果真实历史记录")
         st.dataframe(hist_df, use_container_width=True, hide_index=True)
+else:
+    with main_placeholder.container():
+        st.warning("🔄 正在秒级对齐预言机高速数据流，请稍后...")
 
-# 1秒原地极速重抓，倒计时绝对变成连续变化的秒表
+# 1秒极速无缝刷新
 time.sleep(1)
 st.rerun()
