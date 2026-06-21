@@ -52,7 +52,7 @@ def get_market_data_gate():
     df = pd.DataFrame(mock_bars[::-1], columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     return df.to_dict(orient='list'), mock_price, False
 
-# 核心全要素推演引擎（结合收盘K线与现货最新动能）
+# 核心全要素推演引擎
 def analyze_dynamic_market(df, current_price):
     if df is None or len(df) < 10: return 50.0, 50.0
     
@@ -101,14 +101,13 @@ if 'last_recorded_period' not in st.session_state: st.session_state.last_recorde
 if 'win_count' not in st.session_state: st.session_state.win_count = 0
 if 'total_count' not in st.session_state: st.session_state.total_count = 0
 
-# 实战下注状态寄存器
+# 【修复核心】初始化锁定状态，彻底避免 NameError 报错
 if 'locked_decision' not in st.session_state: st.session_state.locked_decision = "观望"
 if 'locked_win_rate' not in st.session_state: st.session_state.locked_win_rate = 50.0
 
 st.markdown("<h2 style='text-align: center; color: #ffbc00;'>🦅 Gate.io BTC 5M 事件合约决策终端</h2>", unsafe_allow_html=True)
 main_container = st.container()
 
-# 拉取Gate官方高频现货
 df_dict, current_price, is_live = get_market_data_gate()
 df = pd.DataFrame(df_dict)
 
@@ -124,12 +123,13 @@ last_close_price = float(df['close'].iloc[-2])
 price_diff = current_price - last_close_price
 diff_html = f"<span style='color:#00e676; font-size:16px;'>▲ 当前波动: +${price_diff:,.2f}</span>" if price_diff >= 0 else f"<span style='color:#ff1744; font-size:16px;'>▼ 当前波动: -${abs(price_diff):,.2f}</span>"
 
-# 运行AI实时推演指数
 prob_up, prob_down = analyze_dynamic_market(df, current_price)
 
-# 核心信号状态机转换
+# 兜底变量赋初始值，坚决不给报错机会
+current_decision = "观望"
+current_rate = max(prob_up, prob_down)
+
 if rem_seconds > 30:
-    # 正常交易窗口：AI进行高灵敏、不卡死的动态决策输出
     if prob_up >= 62.0:
         current_decision = "看涨 (UP)"
         current_rate = prob_up
@@ -140,33 +140,29 @@ if rem_seconds > 30:
         current_decision = "观望"
         current_rate = max(prob_up, prob_down)
         
-    # 在临近最后开仓期限的前15秒（即剩余30秒到15秒之间），自动捕获并死锁，作为买定离手的最终坚守信号！
     if 15 < rem_seconds <= 30:
-        if st.session_state.locked_decision == "未锁定":
+        if st.session_state.locked_decision == "未锁定" or st.session_state.locked_decision == "观望":
             st.session_state.locked_decision = current_decision
             st.session_state.locked_win_rate = current_rate
         display_decision = st.session_state.locked_decision
         display_rate = st.session_state.locked_win_rate
         msg_prefix = "🔒 买定离手（锁定）"
     else:
-        # 0-4分30秒期间，自由流畅刷新
-        st.session_state.locked_decision = "未锁定" # 保持解开状态
+        st.session_state.locked_decision = "未锁定"
         display_decision = current_decision
         display_rate = current_rate
         msg_prefix = "🔥 实时推荐下注"
 else:
-    # 最后15秒：强制关闭展示
     display_decision = "锁仓"
     msg_prefix = "🛑 强制锁仓"
 
-# 自动记账流水线（在每个5分钟切换的瞬间触发）
+# 自动记账流水线
 if st.session_state.last_recorded_period != period_time_str and len(df) > 2:
     closed_bar = df.iloc[-2]
     actual_direction = "涨 (UP)" if closed_bar['close'] >= closed_bar['open'] else "跌 (DOWN)"
     
-    # 采用最终锁定的决策去核对真实胜率
-    pred = st.session_state.locked_decision if st.session_state.locked_decision != "未锁定" else "观望"
-    if pred == "观望" or pred == "未锁定": res_str = "🛡️ 震荡智能过滤"
+    pred = st.session_state.locked_decision if st.session_state.locked_decision != "未锁定" else current_decision
+    if pred == "观望": res_str = "🛡️ 震荡智能过滤"
     elif (pred == "看涨 (UP)" and actual_direction == "涨 (UP)") or (pred == "看跌 (DOWN)" and actual_direction == "跌 (DOWN)"):
         res_str = "🎯 预测成功"
         st.session_state.win_count += 1
@@ -178,14 +174,14 @@ if st.session_state.last_recorded_period != period_time_str and len(df) > 2:
     net_diff = closed_bar['close'] - closed_bar['open']
     diff_str = f"+${net_diff:.2f}" if net_diff >= 0 else f"-${abs(net_diff):.2f}"
     
-    st.session_state.real_history.insert(0, {"期号": period_time_str, "判定": pred if pred != "未锁定" else "观望", "胜率": f"{prob_up if actual_direction=='涨 (UP)' else prob_down}%", "结果": res_str, "差额": diff_str})
+    st.session_state.real_history.insert(0, {"期号": period_time_str, "判定": pred, "胜率": f"{prob_up if actual_direction=='涨 (UP)' else prob_down}%", "结果": res_str, "差额": diff_str})
     st.session_state.last_recorded_period = period_time_str
 
-# 下注核心提示HTML组装
+# 渲染HTML
 if display_decision == "看涨 (UP)":
-    signal_html = f"<div class='signal-box-up'>{msg_prefix} ➔ <span style='color:#00e676;font-size:20px;font-weight:bold;'>看【UP / 涨】合约</span> (估计胜率: {display_rate}%)</div>"
+    signal_html = f"<div class='signal-box-up'>{msg_prefix} ➔ <span style='color:#00e676;font-size:20px;font-weight:bold;'>建议看【UP / 涨】合约</span> (估计胜率: {display_rate}%)</div>"
 elif display_decision == "看跌 (DOWN)":
-    signal_html = f"<div class='signal-box-down'>{msg_prefix} ➔ <span style='color:#ff1744;font-size:20px;font-weight:bold;'>看【DOWN / 跌】合约</span> (估计胜率: {display_rate}%)</div>"
+    signal_html = f"<div class='signal-box-down'>{msg_prefix} ➔ <span style='color:#ff1744;font-size:20px;font-weight:bold;'>建议看【DOWN / 跌】合约</span> (估计胜率: {display_rate}%)</div>"
 elif display_decision == "锁仓" or rem_seconds <= 15:
     signal_html = "<div class='signal-box-wait'>🛑 <b>强制锁仓提示</b>：进入最后 15 秒结算敏感期，<b>禁止任何人开仓！</b></div>"
 else:
@@ -214,7 +210,7 @@ with main_container:
     st.markdown("### 🎯 大模型下注核心提示")
     st.markdown(signal_html, unsafe_allow_html=True)
     
-    st.markdown("#### 📊 全要素推演置信度矩阵")
+    st.markdown("#### 📊 全要素推推演置信度矩阵")
     st.progress(prob_up / 100.0, text=f"综合看涨 (UP) 指数: {prob_up}%")
     st.progress(prob_down / 100.0, text=f"综合看跌 (DOWN) 指数: {prob_down}%")
     
@@ -233,7 +229,7 @@ with main_container:
             </div>
             """, unsafe_allow_html=True)
 
-# 原生高性能 JS 驱动：缩短至 1.5 秒无感强刷
+# 原生 JS 强刷
 st.components.v1.html(
     """
     <script>
