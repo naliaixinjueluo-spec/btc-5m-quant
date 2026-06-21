@@ -36,10 +36,9 @@ def init_gate():
 
 exchange = init_gate()
 
-@st.cache_data(ttl=1.5)
+@st.cache_data(ttl=1)
 def get_market_data_gate():
     try:
-        # 锁定 Gate.io 官方现货数据
         bars = exchange.fetch_ohlcv('BTC/USDT', timeframe='5m', limit=40)
         ticker = exchange.fetch_ticker('BTC/USDT')
         if bars and ticker:
@@ -53,8 +52,8 @@ def get_market_data_gate():
     df = pd.DataFrame(mock_bars[::-1], columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     return df.to_dict(orient='list'), mock_price, False
 
-# 分析函数完全基于【已经完美收盘】的上一 K 线，保证5分钟内信号绝不漂移！
-def analyze_pure_completed_market(df):
+# 引入当前最新价，加入小幅度微小权重，保证多空进度条会随着最新价秒级轻微跳动！
+def analyze_dynamic_market(df, current_price):
     if df is None or len(df) < 10: return 50.0, 50.0
     
     completed_bar = df.iloc[-2]
@@ -79,7 +78,8 @@ def analyze_pure_completed_market(df):
     volatility = np.std(returns) * c
     volatility = volatility if volatility > 0 else 1.0
     
-    z_score = (c - last_ema20) / volatility
+    # 结合当前实时行权价算 Z-Score
+    z_score = (current_price - last_ema20) / volatility
     base_prob_up = 1 - norm.cdf(-z_score)
     base_prob_down = 1.0 - base_prob_up
     
@@ -96,16 +96,18 @@ def analyze_pure_completed_market(df):
     total_score = up_score + down_score
     return round((up_score / total_score) * 100, 1), round((down_score / total_score) * 100, 1)
 
-# 初始化历史记账本
 if 'real_history' not in st.session_state: st.session_state.real_history = []
 if 'last_recorded_period' not in st.session_state: st.session_state.last_recorded_period = ""
 if 'win_count' not in st.session_state: st.session_state.win_count = 0
 if 'total_count' not in st.session_state: st.session_state.total_count = 0
 
+# 为了买定离手，在会话中锁死本期前4分钟的首次决定
+if 'current_period_decision' not in st.session_state: st.session_state.current_period_decision = "观望"
+if 'current_period_win_rate' not in st.session_state: st.session_state.current_period_win_rate = 50.0
+
 st.markdown("<h2 style='text-align: center; color: #ffbc00;'>🦅 Gate.io BTC 5M 事件合约决策终端</h2>", unsafe_allow_html=True)
 main_container = st.container()
 
-# ⚠️ 此处已彻底修复语法错误
 df_dict, current_price, is_live = get_market_data_gate()
 df = pd.DataFrame(df_dict)
 
@@ -121,17 +123,26 @@ last_close_price = float(df['close'].iloc[-2])
 price_diff = current_price - last_close_price
 diff_html = f"<span style='color:#00e676; font-size:16px;'>▲ 当前波动: +${price_diff:,.2f}</span>" if price_diff >= 0 else f"<span style='color:#ff1744; font-size:16px;'>▼ 当前波动: -${abs(price_diff):,.2f}</span>"
 
-# 核心机制：5分钟周期内，这两个数字被死死锁定，绝不变动！
-prob_up, prob_down = analyze_pure_completed_market(df)
+# 动态计算指数（会跟着价格跳动）
+prob_up, prob_down = analyze_dynamic_market(df, current_price)
 
-# 自动结账流水线
+# 新一期开始，重置方向决策锁
+if rem_seconds > 240: # 换期的前一分钟
+    if prob_up >= 63.0: 
+        st.session_state.current_period_decision = "看涨 (UP)"
+        st.session_state.current_period_win_rate = prob_up
+    elif prob_down >= 63.0: 
+        st.session_state.current_period_decision = "看跌 (DOWN)"
+        st.session_state.current_period_win_rate = prob_down
+    else: 
+        st.session_state.current_period_decision = "观望"
+        st.session_state.current_period_win_rate = max(prob_up, prob_down)
+
+# 自动结账
 if st.session_state.last_recorded_period != period_time_str and len(df) > 2:
     closed_bar = df.iloc[-2]
     actual_direction = "涨 (UP)" if closed_bar['close'] >= closed_bar['open'] else "跌 (DOWN)"
-    
-    if prob_up >= 65.0: pred = "看涨 (UP)"
-    elif prob_down >= 65.0: pred = "看跌 (DOWN)"
-    else: pred = "观望"
+    pred = st.session_state.current_period_decision
     
     if pred == "观望": res_str = "🛡️ 震荡智能过滤"
     elif (pred == "看涨 (UP)" and actual_direction == "涨 (UP)") or (pred == "看跌 (DOWN)" and actual_direction == "跌 (DOWN)"):
@@ -145,19 +156,19 @@ if st.session_state.last_recorded_period != period_time_str and len(df) > 2:
     net_diff = closed_bar['close'] - closed_bar['open']
     diff_str = f"+${net_diff:.2f}" if net_diff >= 0 else f"-${abs(net_diff):.2f}"
     
-    st.session_state.real_history.insert(0, {"期号": period_time_str, "判定": pred, "胜率": f"{max(prob_up, prob_down)}%", "结果": res_str, "差额": diff_str})
+    st.session_state.real_history.insert(0, {"期号": period_time_str, "判定": pred, "胜率": f"{st.session_state.current_period_win_rate}%", "结果": res_str, "差额": diff_str})
     st.session_state.last_recorded_period = period_time_str
 
-# 下注信号
+# 下注核心提示：使用锁定的决定，绝不马后炮漂移！
 if rem_seconds > 15:
-    if prob_up >= 65.0:
-        signal_html = f"<div class='signal-box-up'>🔥 <b>买定离手信号</b> ➔ <span style='color:#00e676;font-size:20px;font-weight:bold;'>看【UP / 涨】合约</span> (本期胜率锁定: {prob_up}%)</div>"
-    elif prob_down >= 65.0:
-        signal_html = f"<div class='signal-box-down'>🔥 <b>买定离手信号</b> ➔ <span style='color:#ff1744;font-size:20px;font-weight:bold;'>看【DOWN / 跌】合约</span> (本期胜率锁定: {prob_down}%)</div>"
+    if st.session_state.current_period_decision == "看涨 (UP)":
+        signal_html = f"<div class='signal-box-up'>🔥 <b>买定离手信号</b> ➔ <span style='color:#00e676;font-size:20px;font-weight:bold;'>建议看【UP / 涨】合约</span> (下注胜率: {st.session_state.current_period_win_rate}%)</div>"
+    elif st.session_state.current_period_decision == "看跌 (DOWN)":
+        signal_html = f"<div class='signal-box-down'>🔥 <b>买定离手信号</b> ➔ <span style='color:#ff1744;font-size:20px;font-weight:bold;'>建议看【DOWN / 跌】合约</span> (下注胜率: {st.session_state.current_period_win_rate}%)</div>"
     else:
-        signal_html = "<div class='signal-box-wait'>💤 <b>智能风控拦截</b>：多空无趋势，<b>建议本期空仓观望。</b></div>"
+        signal_html = f"<div class='signal-box-wait'>💤 <b>智能风控拦截</b>：本期多空共振不足，<b>建议空仓观望。</b></div>"
 else:
-    signal_html = "<div class='signal-box-wait'>🛑 <b>强制锁仓提示</b>：进入最后 15 秒结算敏感期，<b>禁止任何人开仓！</b></div>"
+    signal_html = "<div class='signal-box-wait'>🛑 <b>强制锁仓提示</b>：进入最后 15 秒结算敏感期，<b>禁止开仓！</b></div>"
 
 display_total = st.session_state.total_count if st.session_state.total_count > 0 else 1
 win_rate_calc = (st.session_state.win_count / display_total) * 100
@@ -179,12 +190,12 @@ with main_container:
         st.markdown(f"<h2 style='color:{timer_color}; margin:0; font-family:monospace;'>⏳ {rem_seconds} 秒</h2>", unsafe_allow_html=True)
         
     st.write("---")
-    st.markdown("### 🎯 大模型下注核心提示 (本期5分钟内死锁)")
+    st.markdown("### 🎯 大模型下注核心提示")
     st.markdown(signal_html, unsafe_allow_html=True)
     
-    st.markdown("#### 📊 全要素锁定置信度矩阵")
-    st.progress(prob_up / 100.0, text=f"锁定看涨 (UP) 指数: {prob_up}%")
-    st.progress(prob_down / 100.0, text=f"锁定看跌 (DOWN) 指数: {prob_down}%")
+    st.markdown("#### 📊 全要素推演置信度矩阵 (实时变化博弈)")
+    st.progress(prob_up / 100.0, text=f"综合看涨 (UP) 指数: {prob_up}%")
+    st.progress(prob_down / 100.0, text=f"综合看跌 (DOWN) 指数: {prob_down}%")
     
     st.write("---")
     st.markdown("### 📋 往期预测结果真实历史记录")
@@ -201,7 +212,7 @@ with main_container:
             </div>
             """, unsafe_allow_html=True)
 
-# JS 秒级强刷马达
+# JS 强刷驱动
 st.components.v1.html(
     """
     <script>
@@ -218,7 +229,7 @@ st.components.v1.html(
             }
             if (rrnBtn) { rrnBtn.click(); } 
             else { window.parent.postMessage({type: 'streamlit:render'}, '*'); }
-        }, 2000);
+        }, 1500);
     }
     </script>
     """,
